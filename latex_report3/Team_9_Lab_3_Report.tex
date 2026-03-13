@@ -1,0 +1,311 @@
+\documentclass{article}
+\usepackage{float}
+\usepackage{siunitx} % Provides the \SI{}{} and \si{} command for typesetting SI units
+
+\usepackage{graphicx} % Required for the inclusion of images
+
+\usepackage{tabularx} % Tables
+
+\usepackage{natbib} % Required to change bibliography style to APA
+
+\usepackage{amsmath} % Required for some math elements
+
+% Many options for pseudocode
+\usepackage{algorithm2e}
+\usepackage{algorithmic}
+
+\usepackage{listings} % Python code blocks
+
+\setlength\parindent{0pt} % Removes all indentation from paragraphs
+
+\title{Lab 3 Report: Proportional-Derivative Wall Follower} % Title
+
+\author{Team 9 \\\\ Allen Chen \\ Simdi Okoroafor \\ Soe Wai Yan \\\\ Robotics, Science & Systems} % Team # + Names, Class (RSS)
+
+\date{\today} % Date for the report
+
+\begin{document}
+
+\maketitle
+
+
+\section{Introduction}
+Authored by Simdi Okoroafor \\\\
+Developing an autonomous vehicle requires combining perception and control so that the system can interpret its environment and respond with stable driving behavior. In this lab, we designed and implemented a wall-following controller that allows the vehicle to maintain a desired distance from a wall using LiDAR data. This lab builds on previous RSS labs that focus on working with ROS2, sensor data, and vehicle actuation, and it represents an important step toward building a fully autonomous driving system.\\\\
+
+The purpose of this lab is to design an algorithm that uses LiDAR measurements to estimate the position of a nearby wall and generate steering commands that keep the vehicle at a specified distance from it. The system must operate in real time, continuously processing incoming LiDAR scans and updating the steering commands as the vehicle moves through the environment.\\\\
+
+The core technical challenge is converting raw LiDAR range measurements into a reliable estimate of the vehicle’s position relative to the wall. Our solution uses geometric relationships between selected LiDAR rays to estimate the wall’s orientation and predict the vehicle’s distance from the wall at a lookahead point. This predicted distance is then used in a Proportional–Derivative (PD) controller that computes steering commands to minimize the distance error and maintain stable wall-following behavior.\\\\
+
+\section{Technical Approach}
+\subsection{Wall Following} 
+Authored by Simdi Okoroafor \\\\
+The wall follower node was implemented as a reactive control algorithm that processes LiDAR scan data and generates steering commands to maintain a constant distance from a wall. The approach converts raw LiDAR measurements into a geometric estimate of the vehicle’s position relative to the wall, and then uses this estimate in a feedback controller to compute steering commands in real time.
+
+\begin{enumerate}
+
+\item \textbf{Ray Selection and Filtering}
+
+To estimate the wall geometry, the algorithm uses two LiDAR measurements
+taken at different angles relative to the vehicle. One ray is chosen approximately perpendicular to the wall (around 90° relative to the vehicle), and the second ray is selected at a forward-facing angle (around 55°). These two measurements allow the algorithm to estimate the orientation of the wall relative to the vehicle.
+
+Rather than using a single LiDAR reading, which can be noisy, a small window of neighboring rays around each selected angle is taken and the median value is computed. This median filtering helps reduce the influence of noise, outliers, or spurious reflections in the LiDAR data, resulting in a more stable distance estimate.
+
+\item \textbf{Wall Geometry Estimation}
+
+Using these two filtered distance measurements, the algorithm computes the wall angle and estimates the current perpendicular distance from the wall.
+
+\item \textbf{Lookahead Prediction}
+
+A lookahead distance is then calculated using the wall angle and a fixed lookahead parameter. This predicts the vehicle’s distance from the wall slightly ahead along its trajectory, allowing the controller to anticipate future deviations instead of reacting only to the current position.
+
+\item \textbf{Control Computation}
+
+The predicted distance is compared with the desired wall distance to compute the control error. A Proportional–Derivative (PD) controller converts this error into a steering command, where the proportional term corrects present error and the derivative term dampens oscillations.
+
+\item \textbf{Wall Side Handling and Safety Limits}
+
+The node supports following either the left or right wall, which is handled by adjusting the sign of the distance error depending on the selected side. Finally, steering commands are clamped within a safe range, and vehicle speed is fixed at a stable value to prevent overly aggressive motion. These design choices allow the system to follow the wall smoothly and robustly using real-time LiDAR data.
+
+\end{enumerate}
+
+
+\subsection{Safety Node} 
+Authored by Allen Chen \\\\
+The main goal for safety control is to ensure the car does not cause collateral damage while in operation, especially at high speeds. At the same time, we don’t want the safety to be so obstructive that it stops the autonomous vehicle from accomplishing its driving tasks.\\\\
+We decided to implement a simple distance threshold trigger in which the car would brake if it detected that it was within the specified threshold with respect to the closest object. This ensures that we would be able to specify the distance at which we want to stop and tune the stopping distance so that it stops before crashing into the object, while also making sure it does not pick up farther objects as obstacles. The algorithmic overview below shows how the safety algorithm is triggered and exited.\\\\
+\begin{enumerate}
+    \item Gets Lidar scan ranges from /scan topic from angles -30 to +30 degrees.
+    \item Finds the smallest range, minrange.
+    \item If minrange is less than the distance threshold, dist\_thresh, publish the stop command to /safety, which overrides /ackermann\_cmd, where the wall follower drive commands are published.
+    \item If /scan keeps on detecting obstacles within dist\_thresh, keep on sending stop command to /safety.
+    \item If no /scan ranges are within dist\_thresh, stop sending stop command.
+\end{enumerate}
+
+\section{Experimental Evaluation}
+
+\subsection{Wall Follower Testing}
+Authored by Soe Wai Yan\\\\
+To evaluate the performance of the wall-following controller, we analyze several test cases using an error metric. The error represents the difference between the desired distance and the actual distance from the wall. In our experiments, the desired distance is set to $1.5\,\text{m}$ to maintain a safe separation from the wall.
+
+The error is defined as
+
+\[
+e = d_{\text{desired}} - d_{\text{actual}}
+\]
+
+where $d_{\text{desired}}$ is the target distance from the wall and $d_{\text{actual}}$ is the measured distance from the LiDAR sensor.
+
+A positive error indicates that the vehicle is too close to the wall, while a negative error indicates that the vehicle is too far from the wall.
+
+\subsubsection{Test Case 1: Straight Wall Following at 1 m/s}
+
+\begin{figure}[H]
+    \centering
+    \includegraphics[width=0.9\linewidth]{1.jpeg}
+    \caption{Wall-following error over time for straight wall tracking at 1 m/s.}
+    \label{fig:testcase1}
+\end{figure}
+
+In this test case, the vehicle followed a straight wall at a speed of $1\,\text{m/s}$ while starting from the right side. At the beginning, the error was relatively large because the vehicle started farther from the desired distance. As the controller responded to the LiDAR measurements, the error quickly decreased and stabilized near the desired value. The mean error was approximately $0.035\,\text{m}$, which indicates that the controller maintained a fairly accurate distance from the wall. Small oscillations were still present, suggesting that further tuning of the P and D gains could improve smoothness.
+
+\subsubsection{Test Case 2: Straight Wall Following at 3 m/s}
+
+\begin{figure}[H]
+    \centering
+    \includegraphics[width=0.9\linewidth]{2.jpeg}
+    \caption{Wall-following error over time for straight wall tracking at 3 m/s.}
+    \label{fig:testcase1}
+\end{figure}
+
+In this test case, the vehicle followed the same straight wall but at a higher speed of 3 m/s. Compared to the previous test, the error showed larger oscillations. This occurred because the higher speed reduced the time available for the controller to react to changes in the wall distance. The mean error was approximately 0.23 m which means the vehicle tended to stay slightly farther from the wall than the desired distance. This result suggests that the controller gains work better at lower speeds and may require additional tuning for higher-speed operation.
+
+
+\subsubsection{Test Case 3: Starting from the Middle of the Corridor}
+
+\begin{figure}[H]
+    \centering
+    \includegraphics[width=0.9\linewidth]{3.jpeg}
+    \caption{Starting from the Middle of the Corridor at 1 m/s.}
+    \label{fig:testcase1}
+\end{figure}
+
+In this test case, the vehicle started in the middle of the corridor at a speed of 1 m/s. Since the vehicle began far from the wall, the initial error was large. The controller then steered the vehicle toward the wall and gradually reduced the error. Over time, the vehicle stabilized near the desired distance, and later the controller was able to recover from an initially large deviation.
+
+
+\subsubsection{Test Case 4: Outer Corner Turn}
+
+\begin{figure}[H]
+    \centering
+    \includegraphics[width=0.9\linewidth]{4.jpeg}
+    \caption{Outer Corner Turn at 1 m/s.}
+    \label{fig:testcase1}
+\end{figure}
+
+In this test case, the vehicle followed the wall while turning around an outer corner at a speed of 1 m/s. When the vehicle reached the corner, the wall distance changed suddenly, which caused a spike in the error in the graph. The controller then adjusted the steering to recover and continue following the wall. After completing the turn, the error oscillated for a short time as the vehicle stabilized again near the desired distance.
+
+
+\subsubsection{Test Case 5: Inner Corner Turn}
+
+
+In this test case, the vehicle attempted to follow the wall through an inner corner at a speed of 1 m/s. Unlike the outer corner scenario, the controller struggled because the wall temporarily disappeared from the LiDAR view when the vehicle reached the corner. This caused a large spike in the error and the controller lost the correct wall reference. As a result, the vehicle was unable to maintain stable wall-following behavior through the inner corner. To improve this performance, a wall-loss recovery strategy could be implemented such as increasing the look-ahead distance or expanding the sensing angle range.
+
+
+\subsubsection{Test Case 6:  Starting Facing Away from the Wall}
+
+\begin{figure}[H]
+    \centering
+    \includegraphics[width=0.9\linewidth]{5.jpeg}
+    \caption{Starting Facing Away from the Wall at 1 m/s.}
+    \label{fig:testcase1}
+\end{figure}
+
+In this test case, the vehicle started facing away from the wall at a speed of 1 m/s. Since the wall was not initially within the main sensing region of the LiDAR, the controller first needed to detect and reacquire the wall. As the vehicle moved forward, the LiDAR began to detect the wall again and the controller steered the vehicle toward the desired distance. After this recovery, the vehicle resumed normal wall-following behavior.
+
+
+
+\subsection{Safety Controller Tests}
+Authored by Allen Chen \\\\
+For our experiment, we needed to determine if the use of a braking distance would satisfy the safety requirement at different speeds. As such, we had the car run at a wall in front of it at speeds of 1, 1.5, 2, 2.5 m/s and we kept on increasing the distance threshold at 0.1 m/s until the car was able to stop successfully. We then recorded the Stopping Distance Error, SDE, for successful stopping cases to see how much rolling there is after braking at different speeds. A successful stopping case is one where the car stops before touching the wall.\\\\
+\[
+SDE = dist\_thresh - minrange
+\]
+where dist\_thresh is the specified distance from the closest detected obstacle the car starts braking and minrange is the assumed distance from wall to Lidar sensor, which is also the smallest range the Lidar detects. This allows us to see how much the car rolls after braking.\\\\
+We didn't test higher speeds due to the max limit of the car speed being 2.5 m/s.
+\subsubsection{Braking at 1 m/s}
+\begin{figure}[H]
+    \centering
+    \includegraphics[width=0.8\textwidth]{lab_3/bags/safety_1_1.png}
+    \caption{Graph of the SDE vs. time stopping from car speed at 1 m/s. The graph shows that braking with set distance is very risky as the car stops 60\% into the buffer between the threshold distance and the wall. The threshold on the graph is crossed at SDE = 0 m at 7.5 s, meaning the car rolled 0.30 m.}
+\end{figure}
+For a car traveling at constant speed of 1 m/s, the minimum $dist\_thresh$ needed is 0.5 m. This caused the car to roll about 60\% into the buffer between the threshold and wall, leaving about 0.2 m between sensor and wall.
+\subsubsection{Braking at 1.5 m/s}
+\begin{figure}[H]
+    \centering
+    \includegraphics[width=0.8\textwidth]{lab_3/bags/safety_1_5.png}
+    \caption{Graph of the SDE vs. time stopping from car speed at 1.5 m/s. The graph shows that braking with set distance is very risky as the car stops 71.4\% into the buffer between the threshold distance and the wall. The threshold on the graph is crossed at SDE = 0 m at 6.5 s, meaning the car rolled 0.5 m.}
+\end{figure}
+For a car traveling at constant speed of 1.5 m/s, the minimum $dist\_thresh$ needed is 0.7 m. This caused the car to roll about 71.4\% into the buffer between the threshold and wall, leaving about 0.20 m between sensor and wall.
+\subsubsection{Braking at 2 m/s}
+\begin{figure}[H]
+    \centering
+    \includegraphics[width=0.8\textwidth]{lab_3/bags/safety_2.png}
+    \caption{Graph of the SDE vs. time stopping from car speed at 2 m/s. The graph shows that braking with set distance is more acceptable as the car stops 45.5\% into the buffer between the threshold distance and the wall. The threshold on the graph is crossed at SDE = 0 m at 5.2 s, meaning the car rolled 0.5 m.}
+\end{figure}
+For a car traveling at constant speed of 2 m/s, the minimum $dist\_thresh$ needed is 1.1 m. This caused the car to roll about 45.5\% into the buffer between the threshold and wall, leaving about 0.6 m between sensor and wall.
+\subsubsection{Braking at 2.5 m/s}
+\begin{figure}[H]
+    \centering
+    \includegraphics[width=0.8\textwidth]{lab_3/bags/safety_2_5.png}
+    \caption{Graph of the SDE vs. time stopping from car speed at 2.5 m/s. The graph shows that braking with set distance is very risky as the car stops 76.9\% into the buffer between the threshold distance and the wall. The threshold on the graph is crossed at SDE = 0 m at 3.0 s, meaning the car rolled 1.0 m.}
+\end{figure}
+For a car traveling at constant speed of 2.5 m/s, the minimum $dist\_thresh$ needed is 1.3 m. This caused the car to roll about 76.9\% into the buffer between the threshold and wall, leaving about 0.3 m between sensor and wall.
+
+\section{Conclusion}
+Authored by Soe Wai Yan and Allen Chen\\\\
+To conclude, we successfully implemented a LiDAR-based wall-following controller using PD control. The vehicle was able to track the wall relatively well, especially at lower speeds, maintaining a small average error. Through our experiments, we also learned that controller tuning plays a major role in stability. When the vehicle speed increased, we observed larger oscillations, showing that the current gains are better suited for lower speeds. For future work, we plan to implement a wall-loss recovery strategy so the vehicle can handle situations like inner corner turns where the wall temporarily disappears.\\\\
+In addition, the graphs from safety controller tests showed that braking at a set distance threshold is sufficient if the car was always traveling at a constant speed, but for more varied speeds, it is difficult to set a distance threshold as farther thresholds at low speeds invite detection of non-target objects, while shorter thresholds at high speeds lead to horrible collisions. This strongly suggests the use of using speed as a variable in setting braking distances as there is a general trend in speed vs. successful braking distances.
+
+
+\section{Lessons Learned}
+One of the main lessons from this lab was how important tuning is, especially when transitioning from simulation to real hardware. In simulation, the LiDAR data is very clean and predictable, which makes it easier for the controller to behave well with a wide range of parameter values. However, when running the algorithm on the real robot, the sensor data was noticeably noisier and sometimes contained inconsistent readings. Because of this, parameters that worked well in simulation did not always perform well on the physical system. This made it clear that real-world systems require more careful tuning and additional considerations for sensor noise. Techniques such as taking the median of a small window of LiDAR rays helped make the distance estimates more stable and improved the overall performance of the controller.
+
+Another lesson from this lab was the importance of communication when working on code that needs to integrate with other components. In this lab, different pieces of software often depend on each other. So, clearly communicating changes to code, assumptions about inputs and outputs, and testing results helps ensure that all parts of the system work together correctly. Good communication within the team therefore plays a key role in making sure the final system behaves as expected.
+\section{Algorithms Used}
+
+\subsection{Wall Follower}
+Authored by Simdi Okoroafor \\\\
+
+\begin{algorithm}[H]
+\SetAlgoLined
+\KwIn{LiDAR scan ranges $r$, desired wall distance $d_{\text{des}}$, lookahead distance $L$, wall side $s \in \{\text{left}, \text{right}\}$}
+\KwOut{Steering command $\delta$ and speed command $v$}
+
+\eIf{$s = \text{left}$}{
+    set $\theta_a \gets 90^\circ$, $\theta_b \gets 55^\circ$\;
+}{
+    set $\theta_a \gets -90^\circ$, $\theta_b \gets -55^\circ$\;
+}
+
+select a small window of LiDAR rays around $\theta_a$ and $\theta_b$\;
+compute median distances:
+$a \gets \mathrm{median}(r \text{ near } \theta_a)$,
+$b \gets \mathrm{median}(r \text{ near } \theta_b)$\;
+
+compute angular separation:
+$\theta \gets |\theta_a - \theta_b|$\;
+
+compute wall angle:
+$\alpha \gets \tan^{-1}\left(\dfrac{a\cos\theta - b}{a\sin\theta}\right)$\;
+
+compute current perpendicular distance:
+$D_t \gets b\cos\alpha$\;
+
+compute lookahead distance:
+$D_{t+1} \gets D_t + L\sin\alpha$\;
+
+\eIf{$s = \text{left}$}{
+    $e \gets d_{\text{des}} - D_{t+1}$\;
+}{
+    $e \gets D_{t+1} - d_{\text{des}}$\;
+}
+
+compute derivative term:
+$\dot{e} \gets \dfrac{e - e_{\text{prev}}}{\Delta t}$\;
+
+compute PD steering command:
+$\delta \gets K_p e + K_d \dot{e}$\;
+
+clamp steering:
+$\delta \gets \mathrm{clamp}(\delta, -\delta_{\max}, \delta_{\max})$\;
+
+set speed:
+$v \gets v_{\text{fixed}}$\;
+
+publish Ackermann drive command $(v, \delta)$\;
+store current error:
+$e_{\text{prev}} \gets e$\;
+
+\caption{Wall Follower Algorithm}
+\end{algorithm}
+\begin{algorithm}[H]
+\SetAlgoLined
+\KwIn{LiDAR scan $r$, scan angles $\phi$, latest drive command $(v,\delta)$, range limits $r_{\min}, r_{\max}$, stop threshold $d_{\text{stop}}$, hold time $T_{\text{hold}}$}
+\KwOut{Safe drive command $(v_{\text{safe}}, \delta_{\text{safe}})$}
+
+select LiDAR rays in the forward cone:
+$\phi \in [-30^\circ, 30^\circ]$\;
+
+discard invalid ranges outside $[r_{\min}, r_{\max}]$\;
+
+\eIf{no valid rays remain}{
+    return\;
+}{
+    $d_{\min} \gets \min(r)$\;
+}
+
+compute safety error:
+$e_{\text{safety}} \gets d_{\text{stop}} - d_{\min}$\;
+
+publish $e_{\text{safety}}$\;
+
+\If{$d_{\min} < d_{\text{stop}}$}{
+    $\text{braking} \gets \text{true}$\;
+    $t_{\text{release}} \gets \max(t_{\text{release}},\; t_{\text{now}} + T_{\text{hold}})$\;
+}
+
+\If{$\text{braking} = \text{true}$ and $t_{\text{now}} \ge t_{\text{release}}$ and $d_{\min} \ge d_{\text{stop}}$}{
+    $\text{braking} \gets \text{false}$\;
+}
+
+$v_{\text{safe}} \gets v$, $\delta_{\text{safe}} \gets \delta$\;
+
+\If{$\text{braking} = \text{true}$}{
+    $v_{\text{safe}} \gets 0$\;
+}
+
+publish $(v_{\text{safe}}, \delta_{\text{safe}})$\;
+
+\caption{Safety Controller Algorithm}
+\end{algorithm}
+\end{document}
